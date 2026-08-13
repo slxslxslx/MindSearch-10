@@ -11,7 +11,7 @@ from lagent.llms import (
 
 internlm_server = dict(
     type=LMDeployServer,
-    path="internlm/internlm2_5-7b-chat",
+    path="/nfs2/zdy_download/internlm2_5-7b-chat",
     model_name="internlm2_5-7b-chat",
     meta_template=INTERNLM2_META,
     top_p=0.8,

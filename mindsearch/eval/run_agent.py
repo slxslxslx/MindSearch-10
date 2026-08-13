@@ -93,7 +93,7 @@ from lagent.prompts import (  # 从lagent的提示词模块导入两个解析器
 )
 
 from mindsearch.agent.mindsearch_prompt import (
-    EXTRACT_PROMPT,
+    # EXTRACT_PROMPT,
     FINAL_RESPONSE_CN,
     FINAL_RESPONSE_EN,
     GRAPH_PROMPT_CN,
@@ -430,3 +430,4 @@ if __name__ == "__main__":
 
     # run_agent_on_dataset("bamboogle_data.jsonl")
     run_agent_on_dataset("seal-0.jsonl")
+    # run_agent_on_dataset("xbench-ds-old.jsonl")

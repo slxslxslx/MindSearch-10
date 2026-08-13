@@ -1,0 +1,10 @@
+{
+  "accuracy": "6.31%",
+  "acc_correct_count": 7,
+  "total": 111,
+  "EM": "5.41%",
+  "EM_correct_count": 6,
+  "Precision": "6.79%",
+  "Recall": "9.49%",
+  "F1": "6.97%"
+}

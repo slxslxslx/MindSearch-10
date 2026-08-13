@@ -311,16 +311,62 @@ graph.node("Large Model API Providers"), graph.node("sub_name_2"), ...
 ```<|action_end|>
 """
 
-FINAL_RESPONSE_CN = """基于提供的问答对，撰写一篇详细完备的最终回答。
-- 回答内容需要逻辑清晰，层次分明，确保读者易于理解。
-- 回答中每个关键点需标注引用的搜索结果来源(保持跟问答对中的索引一致)，以确保信息的可信度。给出索引的形式为`[[int]]`，如果有多个索引，则用多个[[]]表示，如`[[id_1]][[id_2]]`。
-- 回答部分需要全面且完备，不要出现"基于上述内容"等模糊表达，最终呈现的回答不包括提供给你的问答对。
-- 语言风格需要专业、严谨，避免口语化表达。
-- 保持统一的语法和词汇使用，确保整体文档的一致性和连贯性。"""
+# FINAL_RESPONSE_CN = """基于提供的问答对，撰写一篇详细完备的最终回答。
+# - 回答内容需要逻辑清晰，层次分明，确保读者易于理解。
+# - 回答中每个关键点需标注引用的搜索结果来源(保持跟问答对中的索引一致)，以确保信息的可信度。给出索引的形式为`[[int]]`，如果有多个索引，则用多个[[]]表示，如`[[id_1]][[id_2]]`。
+# - 回答部分需要全面且完备，不要出现"基于上述内容"等模糊表达，最终呈现的回答不包括提供给你的问答对。
+# - 语言风格需要专业、严谨，避免口语化表达。
+# - 保持统一的语法和词汇使用，确保整体文档的一致性和连贯性。"""
+
+# FINAL_RESPONSE_EN = """Based on the provided Q&A pairs, write a detailed and comprehensive final response.
+# - The response content should be logically clear and well-structured to ensure reader understanding.
+# - Each key point in the response should be marked with the source of the search results (consistent with the indices in the Q&A pairs) to ensure information credibility. The index is in the form of `[[int]]`, and if there are multiple indices, use multiple `[[]]`, such as `[[id_1]][[id_2]]`.
+# - The response should be comprehensive and complete, without vague expressions like "based on the above content". The final response should not include the Q&A pairs provided to you.
+# - The language style should be professional and rigorous, avoiding colloquial expressions.
+# - Maintain consistent grammar and vocabulary usage to ensure overall document consistency and coherence."""
+
+FINAL_RESPONSE_CN = """基于提供的问答对，撰写详尽完整的最终答复。
+- 答复内容逻辑清晰、结构规整，便于读者理解。
+- 答复中每个关键观点均标注检索结果来源索引（与问答对内索引编号保持一致），保障信息可信度。索引格式为`[[整数]]`，多个索引并列使用多个`[[]]`，例如`[[id_1]][[id_2]]`。
+- 内容全面完整，禁止使用“基于以上内容”这类模糊表述；最终答复中不得附带你拿到的问答对原文。
+- 行文风格专业严谨，杜绝口语化表达。
+- 语法与术语用词保持统一，保证全文连贯、行文一致。
+
+完成长篇详细回答后，使用LaTeX方框格式输出极简最终答案：
+\boxed{极简答案内容}
+- \boxed{}内仅保留最核心的必要信息，不要额外文字、单位与解释。
+- 实体名称（人物、地点、机构）：仅填写名称（示例：“Anders van Wesel”，“United States”）。
+- **禁止**包含动词（is、was、founded、located）、冠词（a、an、the）、介词（of、in、at）。
+
+## 输出格式
+- 正文先输出长篇完整回答，单独另起一行放置\boxed{...}。
+- 输出不要包裹在JSON、Markdown代码块内。
+
+## 示例
+问题：花旗银行成立当年，美国总统是谁？
+长篇回答：花旗银行成立于1812年[[1]]。1812年的美国总统为詹姆斯·麦迪逊[[2]]。
+\boxed{James Madison}
+"""
 
 FINAL_RESPONSE_EN = """Based on the provided Q&A pairs, write a detailed and comprehensive final response.
 - The response content should be logically clear and well-structured to ensure reader understanding.
 - Each key point in the response should be marked with the source of the search results (consistent with the indices in the Q&A pairs) to ensure information credibility. The index is in the form of `[[int]]`, and if there are multiple indices, use multiple `[[]]`, such as `[[id_1]][[id_2]]`.
 - The response should be comprehensive and complete, without vague expressions like "based on the above content". The final response should not include the Q&A pairs provided to you.
 - The language style should be professional and rigorous, avoiding colloquial expressions.
-- Maintain consistent grammar and vocabulary usage to ensure overall document consistency and coherence."""
+- Maintain consistent grammar and vocabulary usage to ensure overall document consistency and coherence.
+
+After writing the detailed long answer, provide a very short final answer in the LaTeX boxed format: 
+\boxed{YOUR_SHORT_ANSWER}
+- Output ONLY the minimal essential answer inside \boxed{}, without any extra words, units, or explanations.
+- For entity names (people, places, organizations): output the name only (e.g., "Anders van Wesel", "United States").
+- Do NOT include verbs (is, was, founded, located), articles (a, an, the), prepositions (of, in, at).
+
+## Output Format
+- Write your entire response as natural text, starting with the long answer and ending with a single \boxed{...} line on a new line.
+- Do NOT wrap the output in JSON or markdown code fences.
+
+## Example
+Question: Who was the president of the United States in the year that Citibank was founded?
+Long answer: Citibank was founded in 1812 [[1]]. The President of the United States in 1812 was James Madison [[2]].
+\boxed{James Madison}
+"""

@@ -1,34 +1,72 @@
 # 在文件最顶部添加（第1-3行）
-from dotenv import load_dotenv
 import os
+
+from dotenv import load_dotenv
+
 load_dotenv()  # 自动加载 .env 文件
 
-import openai
 import json
-from tqdm import tqdm
 import re
 
-JUDGE_PROMPT = """
-Task
-I need your help in evaluating an answer provided by an LLM against a ground truth answer for a given question. Your task is to determine if the ground truth answer is present in the LLM's response. Please analyze the provided data and make a decision.
+import openai
+from tqdm import tqdm
 
-Instructions
+
+#@@@@@@@@@@@@@@@@@@
+# 从模型输出中提取短答案
+def extract_short_answer(prediction: str, question: str = None) -> str:
+    """
+    从模型的长回答中提取短答案，风格与 WebThinker 的 extract_answer_fn 一致。
+    优先匹配 \\boxed{...}，其次匹配 ANSWER: / Final Answer: 等标记。
+    """
+    prediction = prediction or ""
+    # 1. 优先匹配 \\boxed{...}
+    boxed_pattern = r"\\boxed\{(.*)\}"
+    boxed_matches = re.findall(boxed_pattern, prediction, re.S)
+    if boxed_matches:
+        return boxed_matches[-1].strip()
+
+    # 2. 其次匹配 Final Answer: / ANSWER: 等
+    for ans_pattern in ["Final Answer:", "final answer:", "FINAL ANSWER:",
+                        "ANSWER:", "Answer:"]:
+        if ans_pattern in prediction:
+            extracted_text = prediction.split(ans_pattern)[-1].strip('**').strip().strip('.')
+            # 去掉可能存在的 \\text{...}
+            inner_pattern = r"\\text\{(.*)\}"
+            inner_matches = re.findall(inner_pattern, extracted_text)
+            if inner_matches:
+                extracted_text = inner_matches[-1].strip("()")
+            return extracted_text.strip()
+
+    # 3. 都没有，取最后 3 行
+    lines = prediction.replace("\n\n", "\n").strip().split('\n')
+    last_lines = "\n".join(lines[-3:]).strip()
+    return last_lines
+
+
+
+#@@@@@@@@@@@@@@@@@@
+JUDGE_PROMPT = """
+## Task
+You are an evaluation assistant. Please determine if the predicted answer is equivalent to the ground truth Answer.
+
+## Instructions
 1. Carefully compare the "Predicted Answer" with the "Ground Truth Answer."
 2. Consider the substance of the answers - look for equivalent information or correct answers. Do not focus on exact wording unless the exact wording is crucial to the meaning.
 3. Your final decision should be based on whether the meaning and the vital facts of the "Ground Truth Answer" are present in the "Predicted Answer."
 
-Input Data
+## Input Data
 - Question: {question}
-- Predicted Answer: {prediction}
+- Predicted Answer: {short_pred}
 - Ground Truth Answer: {answer}
 
-Output Format
+## Output Format
 You should only respond in JSON format as described below and ensure the response can be parsed by Python json.loads.
 Return ONLY valid JSON.
 Do NOT wrap the JSON in markdown or code fences.
 Do NOT add any other text before or after the JSON.
 
-Response Format:
+## Response Format:
 {{
 "Explanation": "(How you made the decision?)",
 "Decision": "TRUE" or "FALSE"
@@ -36,8 +74,34 @@ Response Format:
 
 Your output:
 """
+JUDGE_PROMPT_ZH = """
+## 任务
+你是一个评估助手。请判断预测答案是否与标准答案等价。
 
+## 要求
+1. 仔细比较"模型预测答案"与"标准答案"。
+2. 关注答案的实质内容——寻找语义等价的信息或正确的回答。除非精确措辞对含义至关重要，否则不要拘泥于字面表述。
+3. 最终判断应基于"标准答案"的核心含义和关键事实是否包含在"模型预测答案"中。
 
+## 输入数据
+- 问题：{question}
+- 模型预测答案：{short_pred}
+- 标准答案：{answer}
+
+## 输出格式
+请仅以 JSON 格式回复，确保响应可以被 Python json.loads 解析。
+只返回有效的 JSON。
+不要用 markdown 或代码块包裹 JSON。
+不要在 JSON 前后添加任何其他文字。
+
+## 响应格式：
+{{
+"Explanation": "（你是如何做出判断的？）",
+"Decision": "TRUE" 或 "FALSE"
+}}
+
+你的输出：
+"""
 
 
 def extract_json(text):
@@ -58,49 +122,74 @@ def extract_json(text):
 
     return json.loads(text)
 
+
 def judge(question, answer, prediction, model_name="gpt-4o-free"):
 
     if isinstance(answer, str):
         answer = [answer]
 
-    prompt = JUDGE_PROMPT.format(
-        question = question,
-        answer = json.dumps(answer, ensure_ascii=False),
-        prediction = prediction
-    )
+    # 1. 先从模型长输出中提取短答案   #@@@@@@@@@@@@@@@@@@
+    short_pred = extract_short_answer(prediction, question)
+    print(f"q={question}\n。。。。。。。short_pred={short_pred}。。。。。。。")
+
+    # 2. 构造 LLM-judge prompt
+    prompt = JUDGE_PROMPT.format(question=question, answer=json.dumps(answer, ensure_ascii=False), short_pred=short_pred)  #@@@@@@@@@@@@@@@@@@
+    # prompt = JUDGE_PROMPT_ZH.format(question=question, answer=json.dumps(answer, ensure_ascii=False), short_pred=short_pred)  #@@@@@@@@@@@@@@@@@@
+    
+    # print("##########prompt：",prompt)
+
+    # response = openai.ChatCompletion.create(
+    #     model="gpt-4o-free",
+    #     messages=[{"role": "user", "content": prompt}],
+    #     temperature=0
+    # )
+    # text = response["choices"][0]["message"]["content"]
+
+    # print(os.getenv("OPENAI_API_KEY"))
+
+    # client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url="https://api.inferera.com")  # my  https://aihubmix.com/v1
+   
+   # 3. 调用模型
+    import httpx  # 新增：导入 httpx
+    # ================= 新增：配置 SOCKS5 代理 =================
+    proxy_url = "socks5h://127.0.0.1:1824"
+    # 创建带有代理的 httpx 客户端
+    http_client = httpx.Client(proxy=proxy_url)
+
     client = openai.OpenAI(
-        api_key = os.getenv("OPENAI_API_KEY"),  # my
-        base_url = "https://aihubmix.com/v1"
-    )
+        api_key=os.getenv("OPENAI_API_KEY"), 
+        base_url="https://aihubmix.com/v1" ,
+        http_client=http_client  # 传入自定义的 httpx 客户端
+    )  
+    # =========================================================
 
     response = client.chat.completions.create(
-        model=model_name, # "gpt-4o-free",
+        model=model_name,  # "gpt-4o-free",
         #   model="gpt-4o",
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
+        messages=[{"role": "user", "content": prompt}],
     )
     text = response.choices[0].message.content
-    print("################text:",text)
+    print("################text:", text)
     # ################text: {
     # "Explanation": "The Predicted Answer states that James Madison was the President of the United States during the year Citibank was founded (1812). The Ground Truth Answer also identifies James Madison as the President. Though the wording differs, the critical information, 'James Madison,' is present in the Predicted Answer.",
     # "Decision": "TRUE"
     # }
 
-
+    # 4. 解析 LLM-judge 输出
     try:
-        result = extract_json(text)# json.loads(text)
+        result = extract_json(text)  # json.loads(text)
         print("########################result:", result)
         decision = result["Decision"].lower() == "true"
-        return decision, result, text
+        return decision, result, text, short_pred
 
     except Exception:
-        return False, {"error": "invalid_json"}, text
+        return False, {"error": "invalid_json"}, text, short_pred
 
 
 def run_judge(prediction_file, output_file):
     import time
-    model_name= "gpt-4o" # "gpt-4o-free"
+
+    model_name = "gpt-4o"  # "gpt-4o-free" # gpt-4o
     print("Start judging...")
 
     # ============ 🔑 新增：智能跳过已处理样本 ============
@@ -124,14 +213,13 @@ def run_judge(prediction_file, output_file):
 
     # 2. 用户指定跳过ID（保留原逻辑，统一转为字符串）
     user_skip_ids = {str(x) for x in []}  # 如需调整请修改此处
-    skip_set =  existing_ids | user_skip_ids
+    skip_set = existing_ids | user_skip_ids
     # ============ 🔑 新增结束 ============
-  
+
     processed_count = 0
     skipped_count = 0
 
-    with open(prediction_file, "r", encoding="utf-8") as fin, \
-         open(output_file, "a", encoding="utf-8") as fout:
+    with open(prediction_file, "r", encoding="utf-8") as fin, open(output_file, "a", encoding="utf-8") as fout:
 
         total_lines = sum(1 for _ in fin)  # 预计算总数（用于进度条）
         fin.seek(0)  # 重置文件指针
@@ -143,7 +231,7 @@ def run_judge(prediction_file, output_file):
                 continue
 
             sample = json.loads(line)
-            sample_id  = sample.get("id", "N/A")  # 取 id，没有就显示 N/A
+            sample_id = sample.get("id", "N/A")  # 取 id，没有就显示 N/A
 
             sample_id_str = str(sample_id).strip()
 
@@ -160,26 +248,33 @@ def run_judge(prediction_file, output_file):
             question = sample["question"]
             answer = sample["answer"]
             prediction = sample["prediction"]
+            # short_pred = sample["short_pred"]
 
             print(f"\n🔍 正在处理新样本: id={sample_id} (剩余API调用: {total_lines - processed_count - skipped_count})")
 
+            # if sample_id in [1,2,3,4]:
+            #     continue
 
-            
+            # decision, result, raw_text = judge(
+            #     question,
+            #     answer,
+            #     prediction,
+            #     model_name
+            # )
+
             # ============ ⚠️ 安全调用judge（带错误重试） ============
             max_retries = 7
-            for attempt in range(5,max_retries):
+            for attempt in range(5, max_retries):
                 try:
-                    time.sleep(40)  # ✅ 安全！每个新样本调用前固定等待3秒
-                    decision, result, raw_text = judge(
-                        question, answer, prediction, model_name
-                    )
+                    time.sleep(5) # 20 # ✅ 安全！每个新样本调用前固定等待3秒
+                    decision, result, raw_text, short_pred = judge(question, answer, prediction, model_name)
                     break  # 成功则跳出重试循环
                 except Exception as e:
-                    print('$$$$$$$$$$$$$$$$$$$$$e:',e)
+                    print('$$$$$$$$$$$$$$$$$$$$$e:', e)
                     if "RateLimitError" in str(type(e).__name__) or "429" in str(e):
-                        wait_seconds  = 2 ** attempt  # 指数退避
+                        wait_seconds = 2**attempt  # 指数退避
                         print(f"⏳ 遇到API限流，{wait_seconds }秒后重试 (第{attempt+1}/{max_retries}次)...")
-                        time.sleep(wait_seconds )
+                        time.sleep(wait_seconds)
                         if attempt == max_retries - 1:
                             print(f"❌ 样本 id={sample_id} 判断失败（API配额耗尽），已保存进度")
                             # 保存当前进度后退出（避免浪费剩余配额）
@@ -188,22 +283,11 @@ def run_judge(prediction_file, output_file):
                     else:
                         raise  # 非限流错误直接抛出
             # ============ ⚠️ 调用结束 ============
-            print("################result:",result)
+            print("################result:", result)
 
-            judged_sample = {
-                "id":sample_id,
-                "question": question,
-                "answer": answer,
-                "prediction": prediction,
-                "judge": {
-                    "decision": decision,
-                    "explanation": result.get("Explanation"),
-                    "raw_output": raw_text, 
-                    "judge_model": model_name
-                }
-            }
+            judged_sample = {"id": sample_id, "question": question, "answer": answer, "prediction": prediction, "short_pred": short_pred, "judge": {"decision": decision, "explanation": result.get("Explanation"), "raw_output": raw_text, "judge_model": model_name}}
 
-            fout.write(json.dumps(judged_sample, ensure_ascii=False) + "\n" )
+            fout.write(json.dumps(judged_sample, ensure_ascii=False) + "\n")
             fout.flush()
 
             processed_count += 1
@@ -212,7 +296,94 @@ def run_judge(prediction_file, output_file):
     print(f"\n✅ 判断完成! 新增: {processed_count} 条 | 跳过: {skipped_count} 条")
     print(f"💡 提示: 再次运行将自动跳过所有已处理样本，节省API配额")
 
+
 if __name__ == "__main__":
-    input_path  = "/home/shaolingxuan/project/slx-MindSearch/mindsearch/results/A-GoogleSearch_qwen-3.5-9b-think-tool_seal0/all.jsonl"
-    output_path = "/home/shaolingxuan/project/slx-MindSearch/mindsearch/results/A-GoogleSearch_qwen-3.5-9b-think-tool_seal0/4o-judge.jsonl"
+
+    # input_path = "results/SerpbingP-bamboogle/Predict-all.jsonl"
+    # input_path = "results/SerpBingSearch_qwen-3.5-9b_bamboogle/search3次重试+select打分+searchQ优化/Predict-all.jsonl"
+    # output_path = "results/SerpBingSearch_qwen-3.5-9b_bamboogle/search3次重试+select打分+searchQ优化/juged.jsonl"
+    
+    
+    # input_path = "results/SerpBingSearch_qwen-3.5-9b_bamboogle/3.5适配-base/Predict-all.jsonl"
+    # output_path = "results/SerpBingSearch_qwen-3.5-9b_bamboogle/3.5适配-base/juged.jsonl"
+
+    # input_path = "results/GoogleSearch_qwen-3.5-9b_seal0/测试长wiki添加chunk/GoogleSearch_qwen-3.5-9b_seal0-all.jsonl"
+    # output_path = "results/accuracy_google-seal0-wiki_chunk_juged.jsonl"
+
+    input_path = "/home/shaolingxuan/project/MindSearch-10/mindsearch/results/GoogleSearch-internlm_7b_chat-seal0/all.jsonl"
+    output_path = "/home/shaolingxuan/project/MindSearch-10/mindsearch/results/GoogleSearch-internlm_7b_chat-seal0/4o-judge.jsonl"
+
     run_judge(input_path, output_path)
+
+
+# if __name__ == "__main__":
+# question = "Who was president of the United States in the year that Citibank was founded?"
+# answer = "james madison"
+# prediction = "The President of the United States in the year that Citibank was founded (1812) was James Madison. Madison served as the fourth President of the United States from March 4, 1809, to March 4, 1817. He played a crucial role in the early development of the United States, particularly during the War of 1812, which was fought against Great Britain [[1]][[2]]."
+# res = judge(question, answer, prediction, "gpt-4o-free")
+# print('########res:',res)
+# # ########res: (True, {'Explanation': "The Predicted Answer states that James Madison was the President of the United States during the year Citibank was founded (1812). The Ground Truth Answer also identifies James Madison as the President. Though the wording differs, the critical information, 'James Madison,' is present in the Predicted Answer.", 'Decision': 'TRUE'})
+
+# file_path = "mindsearch/results/bamboogle_data_predictions-test.jsonl"
+# jsonl_data = read_jsonl_file(file_path)
+
+# print(f"共读取到 {len(jsonl_data)} 条数据")
+
+# if jsonl_data:
+#     print("第一条数据：", jsonl_data[0])
+
+
+# (mindsearch) root@autodl-container-bdf4448313-9cfad8a0:~/autodl-tmp/slx-MindSearch# python -m mindsearch.eval.judge_gpt4o
+# Start judging...
+# 0it [00:00, ?it/s]################text: ```json
+# {
+#   "Explanation": "The Predicted Answer correctly identifies James Madison as the President of the United States in 1812, which matches the Ground Truth Answer. The substance and meaning of the Ground Truth Answer are present in the Predicted Answer.",
+#   "Decision": "TRUE"
+# }
+# ```
+# ################result: {'error': 'invalid_json', 'raw_output': '```json\n{\n  "Explanation": "The Predicted Answer correctly identifies James Madison as the President of the United States in 1812, which matches the Ground Truth Answer. The substance and meaning of the Ground Truth Answer are present in the Predicted Answer.",\n  "Decision": "TRUE"\n}\n```'}
+# 1it [00:03,  3.98s/it]################text: ```json
+# {
+#   "Explanation": "The Predicted Answer incorrectly identifies 'Sound of Music' as Disney and states that Disney was added to the S&P 500 in 1995. The Ground Truth Answer states that the company associated with 'Sound of Music' was added to the S&P 500 in 1999. The Ground Truth Answer is not present in the Predicted Answer, as the year and the company mentioned are both incorrect.",
+#   "Decision": "FALSE"
+# }
+# ```
+# ################result: {'error': 'invalid_json', 'raw_output': '```json\n{\n  "Explanation": "The Predicted Answer incorrectly identifies \'Sound of Music\' as Disney and states that Disney was added to the S&P 500 in 1995. The Ground Truth Answer states that the company associated with \'Sound of Music\' was added to the S&P 500 in 1999. The Ground Truth Answer is not present in the Predicted Answer, as the year and the company mentioned are both incorrect.",\n  "Decision": "FALSE"\n}\n```'}
+# 2it [00:07,  3.59s/it]
+# Judge finished
+
+
+# import openai
+
+
+# def judge_answer(question, gold, prediction):
+
+#     prompt = f"""
+#         You are a QA evaluator.
+
+#         Question:
+#         {question}
+
+#         Ground Truth:
+#         {gold}
+
+#         Model Answer:
+#         {prediction}
+
+#         Is the model answer correct?
+
+#         Output only:
+#         CORRECT
+#         or
+#         INCORRECT
+#         """
+
+#     response = openai.ChatCompletion.create(
+#         model="gpt-4o",
+#         messages=[{"role":"user","content":prompt}],
+#         temperature=0
+#     )
+
+#     result = response["choices"][0]["message"]["content"]
+
+#     return "CORRECT" in result.upper()
